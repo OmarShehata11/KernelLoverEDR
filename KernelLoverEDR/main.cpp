@@ -51,6 +51,11 @@ NTSTATUS EdrReadWriteRoutine(
 	PIRP Irp
 );
 
+void EdrCancelRoutine(
+	PDEVICE_OBJECT DeviceObject,
+	PIRP Irp
+);
+
 /* routines for the cancel-safe framework ..*/
 IO_CSQ_INSERT_IRP_EX CsqInsertIrp;
 IO_CSQ_REMOVE_IRP CsqRemoveIrp;
@@ -92,8 +97,8 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING)
 	DriverObject->MajorFunction[IRP_MJ_CLOSE] = DriverObject->MajorFunction[IRP_MJ_CREATE] = EdrCreateCloseRoutine;
 	DriverObject->DriverUnload = EdrUnload;
 	DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = EdrDeviceControl;
-	DriverObject->MajorFunction[IRP_MJ_CLEANUP] = EdrCleanUp;
 	DriverObject->MajorFunction[IRP_MJ_READ] = DriverObject->MajorFunction[IRP_MJ_WRITE] = EdrReadWriteRoutine;
+	 DriverObject->MajorFunction[IRP_MJ_CLEANUP] = EdrCleanUp;
 
 	status = IoCreateDevice(DriverObject, sizeof(DEVICE_EXTENSION), &DeviceName, FILE_DEVICE_UNKNOWN, NULL, FALSE, &DeviceObject);
 
@@ -115,6 +120,8 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING)
 		IoDeleteDevice(DeviceObject);
 		return status;
 	}
+
+	KeInitializeSpinLock(&lpDeviceExtension->QueueSpinLock);
 
 	InitializeListHead(&lpDeviceExtension->IrpQueueHead);
 
@@ -265,7 +272,7 @@ NTSTATUS EdrCleanUp(
 	PIRP Irp
 )
 {
-	PIRP lpIrp = NULL;
+	//PIRP lpIrp = NULL;
 
 	KdPrint(("[*] HI, Entering: %s", __FUNCTION__));
 
@@ -273,13 +280,13 @@ NTSTATUS EdrCleanUp(
 
 	PDEVICE_EXTENSION lpDeviceExtension = (PDEVICE_EXTENSION)DeviceObject->DeviceExtension;
 
-	if (IsListEmpty(&lpDeviceExtension->IrpQueueHead))
+	if (IsListEmpty(&lpDeviceExtension->IrpQueueHead)) 
 		KdPrint(("[**] THE LIST IS ALREADY EMPTY, NOTHING TO DO .\n"));
 	else
-	{
+	{ 
 		KdPrint(("[**] THE LIST IS NOTTT EMPTY, LET'S CLEAN IT UP.\n"));
-		
-		while (!IsListEmpty(&lpDeviceExtension->IrpQueueHead))
+	}
+	/*	while (!IsListEmpty(&lpDeviceExtension->IrpQueueHead))
 		{
 			lpIrp = IoCsqRemoveNextIrp(&lpDeviceExtension->CancelSafeQueue, NULL);
 
@@ -294,6 +301,7 @@ NTSTATUS EdrCleanUp(
 
 		KdPrint(("[**] REMOVING ALL IRPs IS DONE..\n"));
 	}
+	*/
 
 	Irp->IoStatus.Information = 0;
 	Irp->IoStatus.Status = STATUS_SUCCESS;
@@ -424,32 +432,34 @@ PIRP CsqPeekNextIrp(
 	return NULL;
 }
 
+// _IRQL_raises_(DISPATCH_LEVEL)
+// _IRQL_requires_max_(DISPATCH_LEVEL)
+// _Acquires_lock_(CONTAINING_RECORD(Csq, DEVICE_EXTENSION, CancelSafeQueue)->QueueSpinLock)
 void CsqAcquireLock(
 	IN PIO_CSQ Csq, 
 	OUT PKIRQL Irql
 ) 
 {
 
-	//
-	// I don't care now about the synchronization control, so I will just ignore this function
-	//
-
 	UNREFERENCED_PARAMETER(Csq);
-	*Irql = KeGetCurrentIrql();
 
+	// this macro will set the value of the Irql..
+	KeAcquireSpinLock(&CONTAINING_RECORD(Csq, DEVICE_EXTENSION, CancelSafeQueue)->QueueSpinLock, Irql);
 }
 
+
+// _IRQL_requires_(DISPATCH_LEVEL)
+// _Releases_lock_(CONTAINING_RECORD(Csq, DEVICE_EXTENSION, CancelSafeQueue)->QueueSpinLock)
 void CsqReleaseLock(
 	IN PIO_CSQ Csq,
 	IN KIRQL Irql
 ) 
 {
-
-
 	// Same as above ...
 	UNREFERENCED_PARAMETER(Csq);
 	UNREFERENCED_PARAMETER(Irql);
 
+	KeReleaseSpinLock(&CONTAINING_RECORD(Csq, DEVICE_EXTENSION, CancelSafeQueue)->QueueSpinLock, Irql);
 }
 
 void CsqCompleteCanceledIrp(
@@ -457,10 +467,14 @@ void CsqCompleteCanceledIrp(
 	IN PIRP Irp
 )
 {
-
-	// Also do Nothing ...
+	KdPrint(("[&] Entering the Cancel Routine..\n"));
+	
 	UNREFERENCED_PARAMETER(Csq);
-	UNREFERENCED_PARAMETER(Irp);
+	
+	Irp->IoStatus.Status = STATUS_CANCELLED;
+	Irp->IoStatus.Information = 0;
+		
+	IoCompleteRequest(Irp, IO_NO_INCREMENT);
 }
 
 NTSTATUS EdrDeviceControl(
@@ -484,6 +498,13 @@ NTSTATUS EdrDeviceControl(
 
 		KdPrint(("[KLEDR]: PUSHING IRP INTO THE QUEUE..\n"));
 
+		// first marking the IRP with pending.
+		IoMarkIrpPending(Irp);
+
+		// set its status to pending
+		Irp->IoStatus.Status = STATUS_PENDING;
+		
+		// lastly pushing the IRP into the queue..
 		status = IoCsqInsertIrpEx(&lpDeviceExtension->CancelSafeQueue, Irp, NULL, NULL);
 
 		if (!NT_SUCCESS(status))
@@ -502,7 +523,6 @@ NTSTATUS EdrDeviceControl(
 		break;
 	}
 
-	Irp->IoStatus.Status = status;
 
 	// WE DON'T NEED TO CALL IoCompleteRequest NOW, BECAUSE WE DIDN'T FINISH THE IRP.
 
@@ -525,4 +545,82 @@ NTSTATUS EdrReadWriteRoutine(
 	IoCompleteRequest(Irp, IO_NO_INCREMENT);
 
 	return STATUS_SUCCESS;
+}
+
+
+
+/* INGORED FOR NOW ..*/
+void EdrCancelRoutine(
+	PDEVICE_OBJECT DeviceObject,
+	PIRP Irp
+)
+{
+
+	KdPrint(("[*] Hi bro, ENTERING %s\n", __FUNCTION__));
+	
+	PDEVICE_EXTENSION lpDeviceExtension = (PDEVICE_EXTENSION)DeviceObject->DeviceExtension;
+	KIRQL kIrql = Irp->CancelIrql;
+	PIRP lpIrp = NULL;
+	NTSTATUS status = STATUS_SUCCESS;
+
+	// first, cancel the spin lock that was acquired by the I/O manager.
+	IoReleaseCancelSpinLock(kIrql);
+
+	// then now we should dequeue an Irp which has cencel routine set..
+	while (!IsListEmpty(&lpDeviceExtension->IrpQueueHead))
+	{
+		lpIrp = IoCsqRemoveNextIrp(&lpDeviceExtension->CancelSafeQueue, NULL);
+
+		if (lpIrp != NULL)
+		{
+			KdPrint(("[$$] FOUND AN IRP, CHECKING IF IT HAVE THE CANCEL FLAG SET..\n"));
+			
+			if (lpIrp->Cancel)
+			{
+				KdPrint(("[$$] FOUND AN IRP WITH CANCEL FLAG SET.\n"));
+				
+				//unset the cancel routine ..
+				(void)IoSetCancelRoutine(lpIrp, NULL);
+
+				// now canceling it..
+				lpIrp->IoStatus.Status = STATUS_CANCELLED;
+				lpIrp->IoStatus.Information = 0;
+
+				IoCompleteRequest(lpIrp, IO_NO_INCREMENT);
+				
+				KdPrint(("[$$%%$$] THE IRP WAS CANCELED SUCCESSFULLY...\n"));
+
+				//GET OUT OF THE LOOOPP
+				break;
+			}
+
+			KdPrint(("[$$] COULDN'T FIND THE IRP WITH CANCEL YET..\n"));
+
+			// the framework may remove the cancel-routine from it, so I should check..
+			if (lpIrp->CancelRoutine == NULL)
+			{
+				KdPrint(("[$$$] THE FRAMWORK REMOVED YOUR CANCEL ROUTINE, REASSIGNING IT..\n"));
+				IoSetCancelRoutine(lpIrp, EdrCancelRoutine);
+			}
+			
+			// also now repush it again into the queue..
+			status = IoCsqInsertIrpEx(&lpDeviceExtension->CancelSafeQueue, lpIrp, NULL, NULL);
+			
+			if (!NT_SUCCESS(status))
+			{
+				KdPrint(("[$$$] ERROR: while repushing the IRP again into the queue..\n"));
+			}
+
+			// no cancel flag set, then set irp to null
+			lpIrp = NULL;
+
+		}
+
+	} // endofloop
+	
+	// now we should complete the request..
+	Irp->IoStatus.Status = STATUS_SUCCESS;
+	Irp->IoStatus.Information = 0;
+
+	IoCompleteRequest(Irp, IO_NO_INCREMENT);
 }

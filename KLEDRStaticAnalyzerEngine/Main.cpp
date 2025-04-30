@@ -122,8 +122,6 @@ int main()
 		}
 		else
 			std::cout << "[-] ERROR while sending the IOCTL for request number " << i << ", not in pending state, error code : " << GetLastError() << std::endl;
-	
-
 
 	}
 
@@ -133,15 +131,6 @@ int main()
 
 		if (character == 'Q' || character == 'q')
 		{
-/*
-			isSuccess = CancelIoEx(hDevice, NULL);
-
-			if (isSuccess)
-				std::cout << "[+] SUCCESS, the pending IO from ALL threads has canceled correctly.\n";
-			else
-				std::cout << " [-] ERROR, the pending IO from the ALL threads failed to be canceled. error code: " << GetLastError() << std::endl;
-
-*/
 			for(int i = 0; i < g_threadNumbers; i++) {
 			
 				isSuccess = PostQueuedCompletionStatus(threadParamContext->hCompletionPort, 0, 0, NULL);
@@ -153,6 +142,9 @@ int main()
 				}
 
 				std::cout << "[+]SUCCESS: the fake completion packet was sent, packet number: " << i << std::endl;
+				
+				// just sleep for a seconds..
+				Sleep(1000);
 			}
 
 			std::cout << "Waiting for other threads to be finished ..\n";
@@ -162,19 +154,14 @@ int main()
 			std::cout << "DONE. the return value is: " << returnedBytes << ", and the error code if any: " << GetLastError() << std::endl;
 
 			// now canceling ALL I/O requests came from the PROCESS not only specific thread.
+			isSuccess = CancelIoEx(hDevice, NULL);
 
-/*
-			//Canceling any pending IO
-			isSuccess = CancelIo(hDevice);
+			if (isSuccess)
+				std::cout << "DONE, THE MAIN THREAD ENDED IT'S REQUEST..\n";
+			else
+				std::cout << "ERROR: MAIN THREAD COULD NOT END IT'S REQUEST, error code: " << GetLastError() << std::endl;
 
-*/
-
-			CloseHandle(hCompletionPort);
-			CloseHandle(hDevice);
-		
-			break;
-
-			// if not worked, then try goto..
+			Sleep(1000);
 			goto CLEANUPLABEL;
 
 		}
@@ -187,6 +174,10 @@ CLEANUPLABEL:
 		CloseHandle(lpHandleArray[i]);
 
 	std::cout << "Now I'm just about to return...\n";
+	
+	CloseHandle(hCompletionPort);
+	CloseHandle(hDevice);
+	
 	return 0;
 }
 
@@ -217,23 +208,14 @@ DWORD WINAPI ThreadStartRoutine(
 	threadId = GetCurrentThreadId();
 
 
-	while(1) {
+	for(;;) {
 		getQueueReturn = GetQueuedCompletionStatus(lpThreadParameterContext->hCompletionPort, &numofBytestTransfered, &completionKey, &lpOverLapped, INFINITE);
 
 		if (lpOverLapped == NULL)
 		{
 			std::cout << "[+++] WE RECIEVED THE REQUEST TO SHUT US DOWN, SHUTTING DOWN (THREAD ID: " << threadId << ")\n.";
-	
-/*		THERE'S NO NEED FOR NOW TO CANCEL ALL THE I/O REQUESTS...
-			// canceling the pending IO REQUESTS.
-			isSuccess = CancelIo(lpThreadParameterContext->hDevice);
-			
-			if (isSuccess)
-				std::cout << "[=] THE PENDING IO IS CANCELESD \n";
 
-			else
-				std::cout << "[=] ERROR: couldn't cancel the IO REQUEST. error code: " << GetLastError() << std::endl;
-*/
+			// the main thread should cancel all pending requests. So ignore and return.
 			return 0;
 		}
 
