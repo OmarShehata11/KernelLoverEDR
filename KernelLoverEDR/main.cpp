@@ -56,6 +56,11 @@ void EdrCancelRoutine(
 	PIRP Irp
 );
 
+wchar_t* EdrWcsstrSafe(
+	UNICODE_STRING sourceString, 
+	wchar_t* destString
+);
+
 /* routines for the cancel-safe framework ..*/
 IO_CSQ_INSERT_IRP_EX CsqInsertIrp;
 IO_CSQ_REMOVE_IRP CsqRemoveIrp;
@@ -170,9 +175,10 @@ void ProcessCallBackRoutine(
 {
 	UNREFERENCED_PARAMETER(Process);
 	PDEVICE_EXTENSION lpDeviceExtension = (PDEVICE_EXTENSION)CONTAINING_RECORD(g_lpIoCsq, DEVICE_EXTENSION, CancelSafeQueue);
-
-
+	PIO_STACK_LOCATION lpStackLocation = NULL;
+	DATA_TRANSFERE_FROM_KERNEL dataBuffer;
 	PIRP Irp = NULL;
+	wchar_t *outputBuffer = L"Hello from Kernel";
 
 	if (CreateInfo == NULL)
 	{
@@ -180,6 +186,7 @@ void ProcessCallBackRoutine(
 		return;
 	}
 	
+
 	KdPrint(("[*] HI, Entering: %s", __FUNCTION__));
 
 
@@ -190,6 +197,8 @@ void ProcessCallBackRoutine(
 	// just print out the process name..
 	if (CreateInfo->ImageFileName != NULL)
 	{
+		if (EdrWcsstrSafe(*CreateInfo->ImageFileName, L""))
+
 		KdPrint(("[KLEDR]: A newly created process..\n"));
 
 		KdPrint(("[KLEDR]: has a name of : %wZ\n", CreateInfo->ImageFileName));
@@ -221,8 +230,30 @@ void ProcessCallBackRoutine(
 		return;
 	}
 
+	// let's send data to the user land ..
+	lpStackLocation = IoGetCurrentIrpStackLocation(Irp);
+
+	if (lpStackLocation->Parameters.DeviceIoControl.OutputBufferLength < sizeof(DATA_TRANSFERE_FROM_KERNEL))
+	{
+		KdPrint(("[KLEDR] FETAL ERROR: THE DATA THAT SHOULD BE RECIEVED BY THE USER HAS NO EFFIECNT MEMORY SIZE.\n"));
+	}
+	else
+	{
+		KdPrint(("[**] first try printint the data : %ws\n", outputBuffer));
+		// coping the data..
+		RtlCopyMemory(dataBuffer.dataFromKernel, outputBuffer, 35);
+
+		KdPrint(("[**] SECOND try printint the data : %ws\n", dataBuffer.dataFromKernel));
+
+		// set the data ..
+		RtlCopyMemory(Irp->AssociatedIrp.SystemBuffer, &dataBuffer, sizeof(dataBuffer));
+
+	    KdPrint(("[**] third try printint the data : %ws\n", ((PDATA_TRANSFERE_FROM_KERNEL)Irp->AssociatedIrp.SystemBuffer)->dataFromKernel));
+		
+	}
+
 	// now compeleting the IRPs..
-	Irp->IoStatus.Information = 0;
+	Irp->IoStatus.Information = sizeof(dataBuffer);
 	Irp->IoStatus.Status = STATUS_SUCCESS;
 
 	IoCompleteRequest(Irp, IO_NO_INCREMENT);
@@ -487,6 +518,7 @@ NTSTATUS EdrDeviceControl(
 
 	NTSTATUS status;
 	PIO_STACK_LOCATION lpStackLocation = IoGetCurrentIrpStackLocation(Irp);
+	PDATA_TRANSFERE_FROM_USER userData = NULL;
 
 	PDEVICE_EXTENSION lpDeviceExtension = (PDEVICE_EXTENSION)DeviceObjcet->DeviceExtension;
 
@@ -495,6 +527,18 @@ NTSTATUS EdrDeviceControl(
 	case KLEDR_CTL:
 		
 		KdPrint(("[KLEDR]: CATCHED AN I/O REQUEST FROM THE USER_LAND\n"));
+
+		KdPrint(("[KLEDR]: Let's first show the message from the USER LAND...\n"));
+
+		if(lpStackLocation->Parameters.DeviceIoControl.InputBufferLength != sizeof(DATA_TRANSFERE_FROM_USER))
+		{ 
+			KdPrint(("[KLEDR] -- BIG ERROR: the buffer from user mode is not as size as it should be.\n"));
+		}
+		else
+		{
+			userData = (PDATA_TRANSFERE_FROM_USER)Irp->AssociatedIrp.SystemBuffer;
+			KdPrint(("the data from the user is : %ws\n", userData->dataFromUser));
+		}
 
 		KdPrint(("[KLEDR]: PUSHING IRP INTO THE QUEUE..\n"));
 
@@ -623,4 +667,29 @@ void EdrCancelRoutine(
 	Irp->IoStatus.Information = 0;
 
 	IoCompleteRequest(Irp, IO_NO_INCREMENT);
+}
+
+wchar_t* EdrWcsstrSafe(
+	UNICODE_STRING sourceString,
+	wchar_t* destString
+)
+{
+	if (!sourceString.Buffer || !destString)
+		return NULL;
+
+	size_t charCount = sourceString.Length / sizeof(wchar_t);
+
+	if (charCount >= 2047)
+		return NULL;  // Too large
+
+	wchar_t uniString[2048];
+
+	for (size_t i = 0; i < charCount; i++)
+		uniString[i] = sourceString.Buffer[i];
+
+	// null-terminate
+	uniString[charCount] = L'\0';
+
+	// Return non-NULL or NULL based on whether the substring is found
+	return (wcsstr(uniString, destString) != NULL) ? (wchar_t*)1 : NULL;
 }

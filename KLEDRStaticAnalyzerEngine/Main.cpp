@@ -18,7 +18,6 @@ MAIN MODULE OF THE PROGRAM
 				run normally.
 
 	**********************************************
-
 */
 
 
@@ -54,6 +53,7 @@ int main()
 	DWORD returnedBytes = 0, threadId = 0;
 	BOOL isSuccess;
 	PTHREAD_PARAMETER_CONTEXT threadParamContext = new THREAD_PARAMETER_CONTEXT;
+	//DATA_TRANSFERE_FROM_USER dataBuffer;
 
 
 	hDevice = CreateFileA(
@@ -89,6 +89,13 @@ int main()
 	// just sleep for 2 seconds..
 	Sleep(2000);
 
+	//ZeroMemory(&dataBuffer, sizeof(dataBuffer));
+
+	std::cout << "before copying the strings ..\n";
+	
+	//wcscpy_s(dataBuffer.dataFromUser, sizeof(dataBuffer.dataFromUser), L"Hello Omar");
+	
+	std::cout << "after copying the strings ..\n";
 
 	for (int i = 0; i < g_threadNumbers; i++)
 	{
@@ -113,8 +120,9 @@ int main()
 		ZeroMemory(context, sizeof(IO_CONTEXT));
 		
 		// I will now ignore any incoming or outcoming data, I will just sent the request and recieve...
-		isSuccess = DeviceIoControl(hDevice, KLEDR_CTL, nullptr, 0, nullptr, 0, &returnedBytes, &context->ov);
-
+		DeviceIoControl(hDevice, KLEDR_CTL, NULL, 0, &context->DataFromKernel, sizeof(context->DataFromKernel), &returnedBytes, &context->ov);
+		
+		std::cout << "the ERROR CODE IS : " << GetLastError() << std::endl;
 		if ((GetLastError()) == ERROR_IO_PENDING)
 		{ 
 			std::cout << "[+] the IO control is sent successfully and in pending state. request number " << i << std::endl;
@@ -202,11 +210,13 @@ DWORD WINAPI ThreadStartRoutine(
 	OVERLAPPED *lpOverLapped = NULL;
 	PTHREAD_PARAMETER_CONTEXT lpThreadParameterContext;
 	PIO_CONTEXT ioContext;
+	DATA_TRANSFERE_FROM_KERNEL bufDataFromKernel = { 0 };
 
 	lpThreadParameterContext = (PTHREAD_PARAMETER_CONTEXT)lpThreadParameter;
 
 	threadId = GetCurrentThreadId();
 
+	// wcscpy_s(bufDataFromKernel.dataFromKernel, 12, L"TestMessage");
 
 	for(;;) {
 		getQueueReturn = GetQueuedCompletionStatus(lpThreadParameterContext->hCompletionPort, &numofBytestTransfered, &completionKey, &lpOverLapped, INFINITE);
@@ -234,6 +244,11 @@ DWORD WINAPI ThreadStartRoutine(
 		// CREATE ANOTHER REQUEST..
 		ioContext = CONTAINING_RECORD(lpOverLapped, IO_CONTEXT, ov);
 
+		// now let's print the data came from the kernel..
+		std::wcout << "[*****] THE DATA CAME FROM THE KERNEL LAND IS: " << bufDataFromKernel.dataFromKernel << std::endl;
+		
+		printf("[*****] THE DATA CAME FROM THE KERNEL LAND IS: %ls, while its address : %p, and struct address : %p\n", bufDataFromKernel.dataFromKernel, bufDataFromKernel.dataFromKernel, &bufDataFromKernel);
+		
 		// ZERO-OUT THE OVERLAPPED STRUCT AGAIN FOR REUSE..
 		ZeroMemory(ioContext, sizeof(IO_CONTEXT));
 
@@ -243,8 +258,8 @@ DWORD WINAPI ThreadStartRoutine(
 			KLEDR_CTL, 
 			nullptr, 
 			0, 
-			nullptr, 
-			0, 
+			&bufDataFromKernel, 
+			sizeof(bufDataFromKernel), 
 			&numofBytestTransfered,
 			&ioContext->ov
 		);
