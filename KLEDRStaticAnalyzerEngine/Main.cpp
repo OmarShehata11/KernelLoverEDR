@@ -26,7 +26,7 @@ MAIN MODULE OF THE PROGRAM
 #include <iostream>
 #include "../KernelLoverEDR/ioctl_global.h"
 #include "Header.h"
-
+#include "StaticAnalyzer.h"
 
 #define MAX_MESSAGE_SIZE 2048
 
@@ -114,13 +114,13 @@ int main()
 		std::cout << "[*] thread number " << i << " was added to the array.\n";
 
 		// I should send request to the driver for every thread I have..
-		PIO_CONTEXT context = new IO_CONTEXT();
+	/*	PIO_CONTEXT context = new IO_CONTEXT();
 
 		// ZERO OUT THE MEMORY BECAUSE OF OVERLAPPED STRUCTURE..
 		ZeroMemory(context, sizeof(IO_CONTEXT));
 		
 		// I will now ignore any incoming or outcoming data, I will just sent the request and recieve...
-		DeviceIoControl(hDevice, KLEDR_CTL, NULL, 0, &context->DataFromKernel, sizeof(context->DataFromKernel), &returnedBytes, &context->ov);
+		DeviceIoControl(hDevice, KLEDR_CTL, NULL, 0, &context->DataFromKernel, sizeof(DATA_TRANSFERE_FROM_KERNEL), &returnedBytes, &context->ov);
 		
 		std::cout << "the ERROR CODE IS : " << GetLastError() << std::endl;
 		if ((GetLastError()) == ERROR_IO_PENDING)
@@ -130,7 +130,7 @@ int main()
 		}
 		else
 			std::cout << "[-] ERROR while sending the IOCTL for request number " << i << ", not in pending state, error code : " << GetLastError() << std::endl;
-
+    */
 	}
 
 	// we need to find out a way to get the hell out of this looppppp
@@ -178,7 +178,7 @@ int main()
 CLEANUPLABEL:
 	
 	std::cout << "[--] now closing all the threads handle..\n";
-	for (int i = 0; i < 8; i++)
+	for (int i = 0; i < g_threadNumbers; i++)
 		CloseHandle(lpHandleArray[i]);
 
 	std::cout << "Now I'm just about to return...\n";
@@ -208,17 +208,41 @@ DWORD WINAPI ThreadStartRoutine(
 	DWORD numofBytestTransfered = 0, threadId = 0;
 	ULONG_PTR completionKey;
 	OVERLAPPED *lpOverLapped = NULL;
+	OVERLAPPED overLapped;
 	PTHREAD_PARAMETER_CONTEXT lpThreadParameterContext;
 	PIO_CONTEXT ioContext;
 	DATA_TRANSFERE_FROM_KERNEL bufDataFromKernel = { 0 };
+	HANDLE hFile;
+	KLEDR_PE_ANALYSIS_RESULT peAanlyzeResult;
 
 	lpThreadParameterContext = (PTHREAD_PARAMETER_CONTEXT)lpThreadParameter;
 
 	threadId = GetCurrentThreadId();
 
-	// wcscpy_s(bufDataFromKernel.dataFromKernel, 12, L"TestMessage");
+	// wcscpy_s(bufDataFromKernel.binPath, 12, L"TestMessage");
 
 	for(;;) {
+
+		ZeroMemory(&overLapped, sizeof(OVERLAPPED));
+		ZeroMemory(&peAanlyzeResult, sizeof(KLEDR_PE_ANALYSIS_RESULT));
+
+		DeviceIoControl(
+			lpThreadParameterContext->hDevice,
+			KLEDR_CTL,
+			nullptr,
+			0,
+			&bufDataFromKernel,
+			sizeof(DATA_TRANSFERE_FROM_KERNEL),
+			&numofBytestTransfered,
+			&overLapped
+		);
+
+		if ((GetLastError()) == ERROR_IO_PENDING)
+			std::cout << "[+] the IO control is sent successfully and in pending state, from a thread number " << threadId << std::endl;
+
+		else
+			std::cout << "[-] ERROR while sending the IOCTL, not in pending state, \n\t thread ID : " << threadId << "\n\t error code : " << GetLastError() << std::endl;
+
 		getQueueReturn = GetQueuedCompletionStatus(lpThreadParameterContext->hCompletionPort, &numofBytestTransfered, &completionKey, &lpOverLapped, INFINITE);
 
 		if (lpOverLapped == NULL)
@@ -236,39 +260,48 @@ DWORD WINAPI ThreadStartRoutine(
 			return 0;
 		}
 
+		std::cout << "[+] success, we recieved the a complition packet, let's now create another request..\n";
 		std::cout << "[**] NOW IN TID: " << threadId << ", dealing with OVERLAPPED STRUCTURE: " << lpOverLapped << std::endl;
 
-		
-		std::cout << "[+] success, we recieved the a complition packet, let's now create another request..\n";
-
 		// CREATE ANOTHER REQUEST..
-		ioContext = CONTAINING_RECORD(lpOverLapped, IO_CONTEXT, ov);
+	//	ioContext = CONTAINING_RECORD(lpOverLapped, IO_CONTEXT, ov);
 
 		// now let's print the data came from the kernel..
-		std::wcout << "[*****] THE DATA CAME FROM THE KERNEL LAND IS: " << bufDataFromKernel.dataFromKernel << std::endl;
+		std::wcout << "[*****] THE DATA CAME FROM THE KERNEL LAND IS: " << bufDataFromKernel.binPath << std::endl;
 		
-		printf("[*****] THE DATA CAME FROM THE KERNEL LAND IS: %ls, while its address : %p, and struct address : %p\n", bufDataFromKernel.dataFromKernel, bufDataFromKernel.dataFromKernel, &bufDataFromKernel);
+	//	printf("[*****] THE DATA CAME FROM THE KERNEL LAND IS: %ls, while its address : %p, and struct address : %p\n", ioContext->DataFromKernel.binPath, bufDataFromKernel.binPath, &bufDataFromKernel);
 		
+		// let's check if the file is signed or not.
+		std::cout << "checking if the file is signed ...\n";
+		KlEdrCheckSigned(bufDataFromKernel.binPath, &isSuccess);
+		std::cout << "is the file signed ? => " << isSuccess << std::endl;
+
+		// now check for the APIs and the string.
+		std::cout << "checking the string and APIs...\n";
+		
+		peAanlyzeResult = KlEdrAnalyzePeFile(bufDataFromKernel.binPath);
+
+		std::cout << "RESULT..\nString found: " << peAanlyzeResult.StringFound << \
+			"\nWriteProcessMemory Found: " << peAanlyzeResult.WriteProcessMemoryFlag << \
+			"\nCreateRemoteThread Found: " << peAanlyzeResult.CreateRemoteThreadFlag << \
+			"\nVirtualAllocEx Found: " << peAanlyzeResult.VirtualAllocExFlag << \
+			"\nOpenProcess Found: " << peAanlyzeResult.OpenProcessFlag << std::endl;
+
 		// ZERO-OUT THE OVERLAPPED STRUCT AGAIN FOR REUSE..
-		ZeroMemory(ioContext, sizeof(IO_CONTEXT));
+	//	ZeroMemory(ioContext, sizeof(IO_CONTEXT));
 
 		// send the code nowwwwww..
-		DeviceIoControl(
+	/*	DeviceIoControl(
 			lpThreadParameterContext->hDevice,
 			KLEDR_CTL, 
 			nullptr, 
 			0, 
-			&bufDataFromKernel, 
-			sizeof(bufDataFromKernel), 
+			&ioContext->DataFromKernel,
+			sizeof(DATA_TRANSFERE_FROM_KERNEL),
 			&numofBytestTransfered,
 			&ioContext->ov
 		);
-
+	*/
 		// check the status again.
-		if ((GetLastError()) == ERROR_IO_PENDING)
-			std::cout << "[+] the IO control is sent successfully and in pending state, from a thread number " << threadId << std::endl;
-
-		else
-			std::cout << "[-] ERROR while sending the IOCTL, not in pending state, \n\t thread ID : " << threadId << "\n\t error code : " << GetLastError() << std::endl;
 	}
 }

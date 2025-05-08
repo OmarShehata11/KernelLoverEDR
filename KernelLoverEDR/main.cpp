@@ -176,9 +176,8 @@ void ProcessCallBackRoutine(
 	UNREFERENCED_PARAMETER(Process);
 	PDEVICE_EXTENSION lpDeviceExtension = (PDEVICE_EXTENSION)CONTAINING_RECORD(g_lpIoCsq, DEVICE_EXTENSION, CancelSafeQueue);
 	PIO_STACK_LOCATION lpStackLocation = NULL;
-	DATA_TRANSFERE_FROM_KERNEL dataBuffer;
+	DATA_TRANSFERE_FROM_KERNEL dataBuffer = { 0 };
 	PIRP Irp = NULL;
-	wchar_t *outputBuffer = L"Hello from Kernel";
 
 	if (CreateInfo == NULL)
 	{
@@ -197,12 +196,14 @@ void ProcessCallBackRoutine(
 	// just print out the process name..
 	if (CreateInfo->ImageFileName != NULL)
 	{
-		if (EdrWcsstrSafe(*CreateInfo->ImageFileName, L""))
-
+		//if (EdrWcsstrSafe(*CreateInfo->ImageFileName, L""))
+		
 		KdPrint(("[KLEDR]: A newly created process..\n"));
 
 		KdPrint(("[KLEDR]: has a name of : %wZ\n", CreateInfo->ImageFileName));
 
+		// COPYING THE BIN PATH OF THE OPENED FILE..
+		memcpy_s(dataBuffer.binPath, sizeof(dataBuffer), CreateInfo->ImageFileName->Buffer, CreateInfo->ImageFileName->Length);
 	}
 
 	if (CreateInfo->CommandLine != NULL)
@@ -236,24 +237,23 @@ void ProcessCallBackRoutine(
 	if (lpStackLocation->Parameters.DeviceIoControl.OutputBufferLength < sizeof(DATA_TRANSFERE_FROM_KERNEL))
 	{
 		KdPrint(("[KLEDR] FETAL ERROR: THE DATA THAT SHOULD BE RECIEVED BY THE USER HAS NO EFFIECNT MEMORY SIZE.\n"));
+		
+		Irp->IoStatus.Information = 0;
 	}
 	else
 	{
-		KdPrint(("[**] first try printint the data : %ws\n", outputBuffer));
-		// coping the data..
-		RtlCopyMemory(dataBuffer.dataFromKernel, outputBuffer, 35);
-
-		KdPrint(("[**] SECOND try printint the data : %ws\n", dataBuffer.dataFromKernel));
-
 		// set the data ..
 		RtlCopyMemory(Irp->AssociatedIrp.SystemBuffer, &dataBuffer, sizeof(dataBuffer));
 
-	    KdPrint(("[**] third try printint the data : %ws\n", ((PDATA_TRANSFERE_FROM_KERNEL)Irp->AssociatedIrp.SystemBuffer)->dataFromKernel));
+		if(dataBuffer.binPath[0] != 0){
+			KdPrint(("[**] third try printint the data : %ws\n", ((PDATA_TRANSFERE_FROM_KERNEL)Irp->AssociatedIrp.SystemBuffer)->binPath));
+		}
 		
+		Irp->IoStatus.Information = sizeof(dataBuffer);
 	}
 
 	// now compeleting the IRPs..
-	Irp->IoStatus.Information = sizeof(dataBuffer);
+
 	Irp->IoStatus.Status = STATUS_SUCCESS;
 
 	IoCompleteRequest(Irp, IO_NO_INCREMENT);

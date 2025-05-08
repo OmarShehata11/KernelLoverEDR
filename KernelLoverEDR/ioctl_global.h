@@ -11,6 +11,6 @@ typedef struct _DATA_TRANSFERE_FROM_USER
 
 typedef struct _DATA_TRANSFERE_FROM_KERNEL
 {
-	wchar_t dataFromKernel[100] = { 0 };
+	wchar_t binPath[200] = { 0 };
 
 }DATA_TRANSFERE_FROM_KERNEL,*PDATA_TRANSFERE_FROM_KERNEL;
