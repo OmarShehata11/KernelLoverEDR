@@ -7,6 +7,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "KernelLoverEDR", "KernelLov
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "KLEDRStaticAnalyzerEngine", "KLEDRStaticAnalyzerEngine\KLEDRStaticAnalyzerEngine.vcxproj", "{B3D08134-7C65-4A22-8787-B0E9D188CAE6}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "DLLInjector", "DLLInjector\DLLInjector.vcxproj", "{3AB0F08C-3898-4A2A-B21A-8952EF76633E}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|ARM = Debug|ARM
@@ -55,6 +57,18 @@ Global
 		{B3D08134-7C65-4A22-8787-B0E9D188CAE6}.Release|x64.Build.0 = Release|x64
 		{B3D08134-7C65-4A22-8787-B0E9D188CAE6}.Release|x86.ActiveCfg = Release|Win32
 		{B3D08134-7C65-4A22-8787-B0E9D188CAE6}.Release|x86.Build.0 = Release|Win32
+		{3AB0F08C-3898-4A2A-B21A-8952EF76633E}.Debug|ARM.ActiveCfg = Debug|Win32
+		{3AB0F08C-3898-4A2A-B21A-8952EF76633E}.Debug|ARM64.ActiveCfg = Debug|Win32
+		{3AB0F08C-3898-4A2A-B21A-8952EF76633E}.Debug|x64.ActiveCfg = Debug|x64
+		{3AB0F08C-3898-4A2A-B21A-8952EF76633E}.Debug|x64.Build.0 = Debug|x64
+		{3AB0F08C-3898-4A2A-B21A-8952EF76633E}.Debug|x86.ActiveCfg = Debug|Win32
+		{3AB0F08C-3898-4A2A-B21A-8952EF76633E}.Debug|x86.Build.0 = Debug|Win32
+		{3AB0F08C-3898-4A2A-B21A-8952EF76633E}.Release|ARM.ActiveCfg = Release|Win32
+		{3AB0F08C-3898-4A2A-B21A-8952EF76633E}.Release|ARM64.ActiveCfg = Release|Win32
+		{3AB0F08C-3898-4A2A-B21A-8952EF76633E}.Release|x64.ActiveCfg = Release|x64
+		{3AB0F08C-3898-4A2A-B21A-8952EF76633E}.Release|x64.Build.0 = Release|x64
+		{3AB0F08C-3898-4A2A-B21A-8952EF76633E}.Release|x86.ActiveCfg = Release|Win32
+		{3AB0F08C-3898-4A2A-B21A-8952EF76633E}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

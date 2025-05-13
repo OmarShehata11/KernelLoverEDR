@@ -30,23 +30,19 @@ MAIN MODULE OF THE PROGRAM
 
 #define MAX_MESSAGE_SIZE 2048
 
-/* function prototypes */
-
-VOID KlEdrDetectNumOfProcessors();
 
 DWORD WINAPI ThreadStartRoutine(
 	LPVOID lpThreadParameter
 );
 
 
-/* global variables */
-int g_threadNumbers = 0; // it's now 8 threads.
+
 
 int main()
 {
 	// set the number of threads..
-	KlEdrDetectNumOfProcessors();
 	
+	DWORD nThreads = 0;
 	CHAR character;
 	HANDLE hDevice = NULL, hCompletionPort = NULL, hThread = NULL;
 	HANDLE lpHandleArray[8] = { 0 };
@@ -54,6 +50,8 @@ int main()
 	BOOL isSuccess;
 	PTHREAD_PARAMETER_CONTEXT threadParamContext = new THREAD_PARAMETER_CONTEXT;
 	//DATA_TRANSFERE_FROM_USER dataBuffer;
+
+	nThreads = KlEdrDetectNumOfProcessors();
 
 
 	hDevice = CreateFileA(
@@ -97,7 +95,7 @@ int main()
 	
 	std::cout << "after copying the strings ..\n";
 
-	for (int i = 0; i < g_threadNumbers; i++)
+	for (int i = 0; i < nThreads; i++)
 	{
 		// first I should create a thread for each request:
 		hThread = CreateThread(nullptr, 0, ThreadStartRoutine, threadParamContext, 0, &threadId);
@@ -130,7 +128,7 @@ int main()
 		}
 		else
 			std::cout << "[-] ERROR while sending the IOCTL for request number " << i << ", not in pending state, error code : " << GetLastError() << std::endl;
-    */
+	*/
 	}
 
 	// we need to find out a way to get the hell out of this looppppp
@@ -139,7 +137,7 @@ int main()
 
 		if (character == 'Q' || character == 'q')
 		{
-			for(int i = 0; i < g_threadNumbers; i++) {
+			for(int i = 0; i < nThreads; i++) {
 			
 				isSuccess = PostQueuedCompletionStatus(threadParamContext->hCompletionPort, 0, 0, NULL);
 		
@@ -157,7 +155,7 @@ int main()
 
 			std::cout << "Waiting for other threads to be finished ..\n";
 
-			returnedBytes = WaitForMultipleObjects(g_threadNumbers, lpHandleArray, TRUE, 6000);
+			returnedBytes = WaitForMultipleObjects(nThreads, lpHandleArray, TRUE, 6000);
 
 			std::cout << "DONE. the return value is: " << returnedBytes << ", and the error code if any: " << GetLastError() << std::endl;
 
@@ -178,26 +176,31 @@ int main()
 CLEANUPLABEL:
 	
 	std::cout << "[--] now closing all the threads handle..\n";
-	for (int i = 0; i < g_threadNumbers; i++)
+	for (int i = 0; i < nThreads; i++)
 		CloseHandle(lpHandleArray[i]);
 
 	std::cout << "Now I'm just about to return...\n";
 	
 	CloseHandle(hCompletionPort);
 	CloseHandle(hDevice);
+
+	delete[] threadParamContext;
 	
 	return 0;
 }
 
-VOID KlEdrDetectNumOfProcessors()
+DWORD KlEdrDetectNumOfProcessors()
 {
 	SYSTEM_INFO sysInfo;
+	DWORD nProcessors = 0;
 
 	GetSystemInfo(&sysInfo);
 
-	g_threadNumbers = sysInfo.dwNumberOfProcessors;
+	nProcessors = sysInfo.dwNumberOfProcessors;
 
-	std::cout << "[] SIDE NOTE: number of processors are: " << g_threadNumbers << std::endl;
+	std::cout << "[] SIDE NOTE: number of processors are: " << nProcessors << std::endl;
+
+	return nProcessors;
 }
 
 DWORD WINAPI ThreadStartRoutine(

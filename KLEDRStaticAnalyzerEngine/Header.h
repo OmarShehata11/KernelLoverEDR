@@ -1,6 +1,12 @@
 #pragma once
 
 
+/* function prototypes */
+
+// Return Number of threads you system have.
+DWORD KlEdrDetectNumOfProcessors();
+
+
 typedef struct _IO_CONTEXT
 {
 	OVERLAPPED ov;

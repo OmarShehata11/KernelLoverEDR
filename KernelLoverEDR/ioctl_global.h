@@ -1,7 +1,10 @@
 #pragma once
 
+// for the static analyzer part..
 #define KLEDR_CTL CTL_CODE(0XCCEE, 0x910, METHOD_BUFFERED, FILE_ANY_ACCESS)
 
+// for the injector part..
+#define KLEDR_CTL_INJECTOR CTL_CODE(0xCCCE, 0x920, METHOD_BUFFERED, FILE_ANY_ACCESS) 
 
 typedef struct _DATA_TRANSFERE_FROM_USER
 {
