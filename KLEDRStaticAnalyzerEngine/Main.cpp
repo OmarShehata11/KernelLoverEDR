@@ -184,7 +184,7 @@ CLEANUPLABEL:
 	CloseHandle(hCompletionPort);
 	CloseHandle(hDevice);
 
-	delete[] threadParamContext;
+	delete threadParamContext;
 	
 	return 0;
 }

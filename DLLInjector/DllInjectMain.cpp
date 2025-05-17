@@ -216,3 +216,135 @@ DWORD WINAPI InjThreadStartRoutine(
 	// should not be reached anyway..
 	return -2;
 }
+
+
+BOOL InjectDLL(
+	_In_ DWORD PID
+)
+{
+	HANDLE hProcess, hThread;
+	LPVOID lpDllPath = NULL;
+	SIZE_T sDataWritten = 0;
+	BOOL isSuccess, returnValue = FALSE;
+	FARPROC pLoadLibrary = NULL;
+	DWORD threadID;
+
+	// let's first get a handle to that process..
+
+	std::cout << "[*] OPENNING A HANDLE TO THE PROCESS ID " << PID << "...\n";
+	hProcess = OpenProcess(
+		PROCESS_ALL_ACCESS,
+		FALSE,
+		PID
+	);
+
+	if (hProcess == INVALID_HANDLE_VALUE)
+	{
+		std::cout << "[--]ERROR: while getting a handle to the process. error code: " << \
+			GetLastError() << std::endl;
+
+		return FALSE;
+	}
+
+	std::cout << "[+] SUCCESS OPENNING A HANDLE TO THE PROCESS ID " << PID << "...\n";
+
+	//
+	// NOW WE HAVE THE HANDLE, let's try to allocate a space inside that process
+	// address space to assign to it the path to the injected DLL.
+	//
+
+	std::cout << "[*] ALLOCATING SPACE INSIDE PROCESS ID " << PID << "...\n";
+
+	lpDllPath = VirtualAllocEx(
+		hProcess,
+		NULL,
+		DLL_PATH_SIZE,
+		MEM_COMMIT | MEM_RESERVE,
+		PAGE_READONLY
+	);
+
+	if (lpDllPath == NULL)
+	{
+		std::cout << "[-]ERROR: while creating a memory for the DLL path. error code: " << \
+			GetLastError() << std::endl;
+		goto CLEANFUNCUP;
+	}
+	std::cout << "[+] SUCCESS OPENNING A HANDLE TO THE PROCESS ID " << PID << "...\n";
+
+
+	std::cout << "[*] WRITTING DLL PATH INSIDE THE PROCESS ID " << PID << "...\n";
+
+	// now let's write the path of the dll..
+	isSuccess = WriteProcessMemory(
+		hProcess,
+		lpDllPath,
+		DLL_PATH,
+		DLL_PATH_SIZE,
+		&sDataWritten
+	);
+
+	if (!isSuccess)
+	{
+		std::cout << "[-]ERROR: While writing the DLL path to the process address space, error code: " << \
+			GetLastError() << std::endl;
+		goto CLEANFUNCUP;
+	}
+
+	std::cout << "[+] SUCCESS: the DLL path was written, size of what was written: " << sDataWritten << std::endl;
+
+	//
+	// now let's get the address to the procedure "LoadLibray()" to force the process to load
+	// our library..
+	//
+	pLoadLibrary = GetProcAddress(
+		GetModuleHandle(L"Kernel32.dll"), 
+		"LoadLibraryA" // because we don't need to use wide char.
+	); 
+
+	if (pLoadLibrary == NULL)
+	{
+		std::cout << "[-]ERROR: while getting the address of function LoadLibraryA. error code: " \
+			<< GetLastError() << std::endl;
+		goto CLEANFUNCUP;
+	}
+
+
+	std::cout << "[*] Creating the remote thread to PID: " << PID << "...\n";
+
+	// now let's create the thread ..
+
+	hThread = CreateRemoteThread(
+		hProcess,
+		NULL,
+		0,
+		(LPTHREAD_START_ROUTINE) pLoadLibrary,
+		lpDllPath,
+		0,
+		&threadID
+	);
+
+	if (hThread == NULL)
+	{
+		std::cout << "[-] ERROR: while creating the remote thread to process: " << PID << \
+			". error code: " << GetLastError() << std::endl;
+		goto CLEANFUNCUP;
+	}
+
+	std::cout << "[+] SUCCESS: the remote thread created successfully to PID: " << PID << std::endl;
+
+	std::cout << "[+] THE DLL INJECTED SUCCESSFULLY TO PID: " << PID << "....\n";
+
+	// everything completed well..
+	returnValue = TRUE;
+
+CLEANFUNCUP:
+	if (lpDllPath != NULL)
+		VirtualFreeEx(hProcess, lpDllPath, DLL_PATH_SIZE, MEM_RELEASE);
+
+	if (hThread != NULL)
+		CloseHandle(hThread);
+
+	CloseHandle(hProcess);
+
+	return returnValue;
+}

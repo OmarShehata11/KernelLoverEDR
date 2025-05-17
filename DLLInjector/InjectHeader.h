@@ -1,10 +1,17 @@
 #pragma once
 
+#define DLL_PATH "\\path\\to\\DLL.dll" // need to be modified..
+#define DLL_PATH_SIZE sizeof(DLL_PATH + 2) // the 2 is just to make sure..
+
 /* FUNCTION PROTOTYPES */
 DWORD WINAPI InjThreadStartRoutine(
 	LPVOID lpThreadParameter
 );
 
+// injects a DLL into specified process
+BOOL InjectDLL(
+	_In_ DWORD PID
+);
 
 /* STRUCTURES */
 
