@@ -56,7 +56,7 @@ void EdrCancelRoutine(
 	PIRP Irp
 );
 
-wchar_t* EdrWcsstrSafe(
+BOOLEAN EdrWcsstrSafe(
 	UNICODE_STRING sourceString, 
 	wchar_t* destString
 );
@@ -103,7 +103,7 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING)
 	DriverObject->DriverUnload = EdrUnload;
 	DriverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = EdrDeviceControl;
 	DriverObject->MajorFunction[IRP_MJ_READ] = DriverObject->MajorFunction[IRP_MJ_WRITE] = EdrReadWriteRoutine;
-	 DriverObject->MajorFunction[IRP_MJ_CLEANUP] = EdrCleanUp;
+	DriverObject->MajorFunction[IRP_MJ_CLEANUP] = EdrCleanUp;
 
 	status = IoCreateDevice(DriverObject, sizeof(DEVICE_EXTENSION), &DeviceName, FILE_DEVICE_UNKNOWN, NULL, FALSE, &DeviceObject);
 
@@ -129,6 +129,7 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING)
 	KeInitializeSpinLock(&lpDeviceExtension->QueueSpinLock);
 
 	InitializeListHead(&lpDeviceExtension->IrpQueueHead);
+	InitializeListHead(&lpDeviceExtension->IrpQueueHeadInjector);
 
 	IoCsqInitializeEx(
 		&lpDeviceExtension->CancelSafeQueue, 
@@ -178,6 +179,8 @@ void ProcessCallBackRoutine(
 	PIO_STACK_LOCATION lpStackLocation = NULL;
 	DATA_TRANSFERE_FROM_KERNEL dataBuffer = { 0 };
 	PIRP Irp = NULL;
+	BOOLEAN staticAnalyzerResponse = TRUE;
+	PLIST_ENTRY pListEntryHead = &lpDeviceExtension->IrpQueueHead;
 
 	if (CreateInfo == NULL)
 	{
@@ -196,7 +199,12 @@ void ProcessCallBackRoutine(
 	// just print out the process name..
 	if (CreateInfo->ImageFileName != NULL)
 	{
-		//if (EdrWcsstrSafe(*CreateInfo->ImageFileName, L""))
+		// just a check to know if I would use the injector or not for now (as a test)
+		if (EdrWcsstrSafe(*CreateInfo->ImageFileName, L"OmarAhmedTest.exe"))
+		{
+			staticAnalyzerResponse = FALSE;
+			pListEntryHead = &lpDeviceExtension->IrpQueueHeadInjector;
+		}
 		
 		KdPrint(("[KLEDR]: A newly created process..\n"));
 
@@ -217,12 +225,19 @@ void ProcessCallBackRoutine(
 	CreateInfo->CreationStatus = STATUS_SUCCESS;
 
 	// here now we should pull out an IRP and complete it .
-	if(! IsListEmpty(&lpDeviceExtension->IrpQueueHead) )
+	if(! IsListEmpty(pListEntryHead) )
 	{ 
-		Irp = IoCsqRemoveNextIrp(g_lpIoCsq, NULL);
-	
+		// OK, So I should now remove an IRP of the injector if only (just for test)
+		// the process running is running under the name of OmarAhmedTest.exe (again just for test).
+		// so the PeekContext parameter of IoCsqRemovenextIrp() will only refere to which queue I should
+		// remove the Irp from =>
+		//		if TRUE == static analyzer queue
+		//		if FALSE == injector queue
+
+		Irp = IoCsqRemoveNextIrp(&lpDeviceExtension->CancelSafeQueue, &staticAnalyzerResponse); 
+
 		KdPrint(("[KLEDR]: [+] THE IRP REMOVED FROM THE QUEUE..\n"));
-	
+
 	}
 
 	if (Irp == NULL)
@@ -246,7 +261,7 @@ void ProcessCallBackRoutine(
 		RtlCopyMemory(Irp->AssociatedIrp.SystemBuffer, &dataBuffer, sizeof(dataBuffer));
 
 		if(dataBuffer.binPath[0] != 0){
-			KdPrint(("[**] third try printint the data : %ws\n", ((PDATA_TRANSFERE_FROM_KERNEL)Irp->AssociatedIrp.SystemBuffer)->binPath));
+			KdPrint(("[**] third try printing the data : %ws\n", ((PDATA_TRANSFERE_FROM_KERNEL)Irp->AssociatedIrp.SystemBuffer)->binPath));
 		}
 		
 		Irp->IoStatus.Information = sizeof(dataBuffer);
@@ -362,26 +377,44 @@ NTSTATUS CsqInsertIrp(
 	
 	*/
 
-	UNREFERENCED_PARAMETER(InsertContext);
+	
 
 	BOOLEAN isEmpty = TRUE;
+	BOOLEAN IrpContext = *(PBOOLEAN)InsertContext; 
+
 
 	// first we need the device extension because it holds important info we need..
 	PDEVICE_EXTENSION lpDeviceExtension = CONTAINING_RECORD(Csq, DEVICE_EXTENSION, CancelSafeQueue);
 
-	
-	InsertTailList(&lpDeviceExtension->IrpQueueHead, &Irp->Tail.Overlay.ListEntry);
+	if (IrpContext) { // if true == static queue
 
-	// check if it was added or not :
-	isEmpty = IsListEmpty(&lpDeviceExtension->IrpQueueHead);
+		InsertTailList(&lpDeviceExtension->IrpQueueHead, &Irp->Tail.Overlay.ListEntry);
+		isEmpty = IsListEmpty(&lpDeviceExtension->IrpQueueHead);
 
-	if (isEmpty)
-	{
-		KdPrint(("[KLEDR]: [-]ERROR, couldn't push the IRP into the queue.\n"));
-		return STATUS_UNSUCCESSFUL;
+		if (isEmpty)
+		{
+			KdPrint(("[KLEDR]: [-]ERROR, couldn't push the IRP into the static analyzer queue.\n"));
+			return STATUS_UNSUCCESSFUL;
+		}
+
+		KdPrint(("[KLEDR]: [+]DONE, pushing an IRP into the static analyzer queue.\n"));
+
 	}
+	else {// false == it's the injector queue
+	
+		InsertTailList(&lpDeviceExtension->IrpQueueHeadInjector, &Irp->Tail.Overlay.ListEntry);
+		isEmpty = IsListEmpty(&lpDeviceExtension->IrpQueueHeadInjector);
 
-	KdPrint(("[KLEDR]: [+]DONE, pushing an IRP into the queue.\n"));
+		if (isEmpty)
+		{
+			KdPrint(("[KLEDR]: [-]ERROR, couldn't push the IRP into the Injector queue.\n"));
+			return STATUS_UNSUCCESSFUL;
+		}
+
+		KdPrint(("[KLEDR]: [+]DONE, pushing an IRP into the Injector queue.\n"));
+
+
+	}
 
 	return STATUS_SUCCESS;
 
@@ -420,16 +453,21 @@ PIRP CsqPeekNextIrp(
 		WILL BE ENOUGH (I DON'T NEED A SPECIFIC IRP)
 	
 	*/
-
-	UNREFERENCED_PARAMETER(PeekContext);
+	
+	BOOLEAN IrpContext = *(PBOOLEAN)PeekContext;
 
 	PLIST_ENTRY pListEntry = NULL;
 
 	PDEVICE_EXTENSION lpDeviceExtension = CONTAINING_RECORD(Csq, DEVICE_EXTENSION, CancelSafeQueue);
+	PLIST_ENTRY queueListEntry = NULL;
 
+	if (IrpContext)
+		queueListEntry = &lpDeviceExtension->IrpQueueHead;
+	else
+		queueListEntry = &lpDeviceExtension->IrpQueueHeadInjector;
 
 	// check if the list is empty
-	if (IsListEmpty(&lpDeviceExtension->IrpQueueHead))
+	if (IsListEmpty(queueListEntry))
 	{
 		KdPrint(("[KLEDR] IRP_QUEUE: the list is empty, can't peek to another IRP.\n"));
 		return NULL;
@@ -440,7 +478,7 @@ PIRP CsqPeekNextIrp(
 	if (Irp == NULL)
 	{
 		// then now we should pass the one just after the list head..
-		pListEntry = lpDeviceExtension->IrpQueueHead.Flink;
+		pListEntry = queueListEntry->Flink;
 	}
 	else
 	{
@@ -450,13 +488,16 @@ PIRP CsqPeekNextIrp(
 
 
 	// check if we are not in the start of the queue:
-	if(pListEntry != &lpDeviceExtension->IrpQueueHead)
+	if(pListEntry != queueListEntry)
 	{
 		// now get the real IRP
 		PIRP retIrp = CONTAINING_RECORD(pListEntry, IRP, Tail.Overlay.ListEntry);
 		
-		KdPrint(("[KLEDR] IRP_QUEUE: Next Irp found!.\n"));
-		// I'm going to ignore the peekcontext for now ..
+		if(IrpContext)
+			KdPrint(("[KLEDR] IRP_QUEUE: Next Irp found in the static analyzer queue!.\n"));
+		else
+			KdPrint(("[KLEDR] IRP_QUEUE: Next Irp found in the Injector queue!.\n"));
+
 		return retIrp;
 	}
 
@@ -519,6 +560,10 @@ NTSTATUS EdrDeviceControl(
 	NTSTATUS status;
 	PIO_STACK_LOCATION lpStackLocation = IoGetCurrentIrpStackLocation(Irp);
 	PDATA_TRANSFERE_FROM_USER userData = NULL;
+	IO_CSQ_IRP_CONTEXT csqIrpContext = { 0 };
+	BOOLEAN IrpContextType; // I will use this as a value to choose between any queue I should push into.
+
+	
 
 	PDEVICE_EXTENSION lpDeviceExtension = (PDEVICE_EXTENSION)DeviceObjcet->DeviceExtension;
 
@@ -547,9 +592,12 @@ NTSTATUS EdrDeviceControl(
 
 		// set its status to pending
 		Irp->IoStatus.Status = STATUS_PENDING;
-		
+
+		// let's set the context nowww..
+		IrpContextType = TRUE; // THIS MEANS THAT IT'S FOR THE STATIC ANALYZER
+
 		// lastly pushing the IRP into the queue..
-		status = IoCsqInsertIrpEx(&lpDeviceExtension->CancelSafeQueue, Irp, NULL, NULL);
+		status = IoCsqInsertIrpEx(&lpDeviceExtension->CancelSafeQueue, Irp, NULL, &IrpContextType);
 
 		if (!NT_SUCCESS(status))
 		{
@@ -558,6 +606,29 @@ NTSTATUS EdrDeviceControl(
 		}
 
 		KdPrint(("[KLEDR]: [+]SUCCESS, THE IRP IS PUSHED TO THE QUEUE.\n"));
+		status = STATUS_PENDING;
+		break;
+
+	// now in case that we received a request from the injector..
+	case KLEDR_CTL_INJECTOR:
+
+		KdPrint(("[KLEDR]: CATCHED AN I/O REQUEST FROM THE USER_LAND INJECTOR\n"));
+
+		IoMarkIrpPending(Irp);
+
+		Irp->IoStatus.Status = STATUS_PENDING;
+
+		IrpContextType = FALSE; // means for the injector
+
+		status = IoCsqInsertIrpEx(&lpDeviceExtension->CancelSafeQueue, Irp, NULL, &IrpContextType);
+
+		if (!NT_SUCCESS(status))
+		{
+			KdPrint(("[KLEDR]: [-]ERROR, COULDN'T INSERT THE IRP INTO THE QUEUE OF THE INJECTOR.\n"));
+			break;
+		}
+
+		KdPrint(("[KLEDR]: [+]SUCCESS, THE IRP IS PUSHED TO THE QUEUE OF THE INJECTOR.\n"));
 		status = STATUS_PENDING;
 		break;
 
@@ -669,18 +740,18 @@ void EdrCancelRoutine(
 	IoCompleteRequest(Irp, IO_NO_INCREMENT);
 }
 
-wchar_t* EdrWcsstrSafe(
+BOOLEAN EdrWcsstrSafe(
 	UNICODE_STRING sourceString,
 	wchar_t* destString
 )
 {
 	if (!sourceString.Buffer || !destString)
-		return NULL;
+		return FALSE;
 
 	size_t charCount = sourceString.Length / sizeof(wchar_t);
 
 	if (charCount >= 2047)
-		return NULL;  // Too large
+		return FALSE;  // Too large
 
 	wchar_t uniString[2048];
 
@@ -690,6 +761,6 @@ wchar_t* EdrWcsstrSafe(
 	// null-terminate
 	uniString[charCount] = L'\0';
 
-	// Return non-NULL or NULL based on whether the substring is found
-	return (wcsstr(uniString, destString) != NULL) ? (wchar_t*)1 : NULL;
+	// Return true or false based on whether the substring is found
+	return (wcsstr(uniString, destString) != NULL) ? TRUE : FALSE;
 }

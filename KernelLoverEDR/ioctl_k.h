@@ -2,8 +2,11 @@
 
 typedef struct _DEVICE_EXTENSION {
 
-	/* the douple-linked list */
+	/* the double-linked list */
 	LIST_ENTRY IrpQueueHead;
+
+	/* this is for the injector part of the system */
+	LIST_ENTRY  IrpQueueHeadInjector;
 
 	/* framework queue */
 	IO_CSQ CancelSafeQueue;

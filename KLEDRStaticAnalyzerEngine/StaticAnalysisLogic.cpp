@@ -12,6 +12,7 @@
 #pragma comment (lib, "wintrust")
 #pragma comment (lib, "Dbghelp")
 
+
 // pass by const reference to make sure the parameter won't be modified.
 VOID KlEdrCheckSigned(
 	_In_ const wchar_t* binPath, 
@@ -105,6 +106,8 @@ KLEDR_PE_ANALYSIS_RESULT KlEdrAnalyzePeFile(
 	BYTE* fileData = NULL;
 	PIMAGE_DOS_HEADER pDosHeader = NULL;
 	PIMAGE_NT_HEADERS pNtHeader = NULL;
+	PIMAGE_NT_HEADERS32 pNtHeader32 = NULL;
+	PIMAGE_NT_HEADERS pNtHeaderCorrect = NULL;
 	WORD numberOfSections = 0;
 	PIMAGE_SECTION_HEADER pImageSectionHeader = NULL;
 	const char* comparisonString = "SeDebugPrivilege";
@@ -116,9 +119,14 @@ KLEDR_PE_ANALYSIS_RESULT KlEdrAnalyzePeFile(
 	CHAR sectionName[IMAGE_SIZEOF_SHORT_NAME + 1] = { 0 };
 	DWORD pIltRva = 0;
 	PIMAGE_IMPORT_DESCRIPTOR pImageImportDescriptor = NULL;
-	PIMAGE_THUNK_DATA pThunkData = NULL;
+	PIMAGE_THUNK_DATA32 pThunkData32 = NULL;
+	PIMAGE_THUNK_DATA64 pThunkData64 = NULL;
+	PIMAGE_THUNK_DATA pThunkDataCorrect = NULL;
+
 	PIMAGE_IMPORT_BY_NAME pImageImportByName = NULL;
 	char* ModuleName = NULL;
+	int counterForMe = 0;
+	bool is32BitApp = false;
 
 	// at first, let's get a handle to that pe file.. ( DON'T FORGET TO CLOSE THE HANDLE BECAUSE IT'S NOT SHARED)
 	hFile = CreateFileW(
@@ -207,6 +215,13 @@ KLEDR_PE_ANALYSIS_RESULT KlEdrAnalyzePeFile(
 
 		std::cout << "checking " << sectionName << " section...\n";
 
+		if (sectionSize == 0)
+		{
+			std::cout << "Ignoring section " << sectionName;
+			std::wcout << " in bin file " << binPath << " because it has 0 section size.\n";
+			continue;
+		}
+
 		for (int j = 0; j < sectionSize - stringSize; j++)
 		{
 			if (memcmp(pSectionRawData + j, comparisonString, stringSize) == 0)
@@ -249,59 +264,51 @@ KLEDR_PE_ANALYSIS_RESULT KlEdrAnalyzePeFile(
 	//
 	// now let's search for the import table to find APIs..
 	//
-	
-	pIltRva = pNtHeader->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress;
 
+	if (pNtHeader->OptionalHeader.Magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC) // SO NOW IT's a 32-bit applicaiton
+	{
+		is32BitApp = true;
+
+		pNtHeader32 =(PIMAGE_NT_HEADERS32) pNtHeader;
+		pNtHeaderCorrect = (PIMAGE_NT_HEADERS)pNtHeader32;
+		pIltRva = pNtHeader32->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress; // here residees the probelmmmmm
+
+	}
+	else
+	{
+		pNtHeaderCorrect = pNtHeader;
+		pIltRva = pNtHeader->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress; // here residees the probelmmmmm
+
+	}
 	// now let's iterate for every DLL
-	pImageImportDescriptor = (PIMAGE_IMPORT_DESCRIPTOR)ImageRvaToVa(pNtHeader, fileData, pIltRva, NULL);
+	pImageImportDescriptor = (PIMAGE_IMPORT_DESCRIPTOR)ImageRvaToVa(pNtHeaderCorrect, fileData, pIltRva, NULL);
 
-	std::cout << "interating between all DLLs..\n";
+	std::cout << "iterating between all DLLs..\n";
 	// iterate between all DLLS
 	try
 	{
 	 while (pImageImportDescriptor->FirstThunk)
 	 {
+		 counterForMe++;
 		 
-		ModuleName = (char*)ImageRvaToVa(pNtHeader, fileData, pImageImportDescriptor->Name, NULL);
+		ModuleName = (char*)ImageRvaToVa(pNtHeaderCorrect, fileData, pImageImportDescriptor->Name, NULL);
 
 		std::cout << "Checking " << ModuleName << " Module..\n";
+		
+		if(is32BitApp)
+		{ 
 		// IAT
-		pThunkData = (PIMAGE_THUNK_DATA)ImageRvaToVa(pNtHeader, fileData, pImageImportDescriptor->OriginalFirstThunk, NULL);
+			pThunkData32 = (PIMAGE_THUNK_DATA32)ImageRvaToVa(pNtHeaderCorrect, fileData, pImageImportDescriptor->OriginalFirstThunk, NULL);
+			ProcessThunkData(pThunkData32, pNtHeaderCorrect, fileData, result);
+		}
+		else
+		{
+			pThunkData64 = (PIMAGE_THUNK_DATA64)ImageRvaToVa(pNtHeaderCorrect, fileData, pImageImportDescriptor->OriginalFirstThunk, NULL);
+			ProcessThunkData(pThunkData64, pNtHeaderCorrect, fileData, result);
 
-		// interate between every API
 
-			while (pThunkData->u1.AddressOfData)
-			{
-				if (pThunkData->u1.Ordinal & IMAGE_ORDINAL_FLAG)
-				{
-					// DO NOTHING FOR NOW
-				}
-				else
-				{
-					// let's get the name..
-					pImageImportByName = (PIMAGE_IMPORT_BY_NAME)ImageRvaToVa(pNtHeader, fileData, pThunkData->u1.AddressOfData, NULL);
-
-					// let's check the APIs ..
-					if (strcmp("OpenProcess", pImageImportByName->Name) == 0) {
-						result.OpenProcessFlag = TRUE;
-					}
-
-					if (strcmp("VirtualAllocEx", pImageImportByName->Name) == 0) {
-						result.VirtualAllocExFlag = TRUE;
-					}
-
-					if (strcmp("WriteProcessMemory", pImageImportByName->Name) == 0) {
-						result.WriteProcessMemoryFlag = TRUE;
-					}
-
-					if (strcmp("CreateRemoteThread", pImageImportByName->Name) == 0) {
-						result.CreateRemoteThreadFlag = TRUE;
-					}
-				}
-				pThunkData++;
-			} // function loop
-
-			std::cout << "Not the MODULE, let's check the other module..\n";
+		}
+			std::cout << "**checking the other module..\n";
 			pImageImportDescriptor++;
 		} // DLLs loop
 

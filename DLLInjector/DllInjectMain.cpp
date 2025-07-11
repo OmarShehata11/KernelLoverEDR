@@ -12,16 +12,17 @@ TASKS:
 
 #include <Windows.h>
 #include <iostream>
-#include "InjectHeader.h"
 #include "../KernelLoverEDR/ioctl_global.h"
 #include "../KLEDRStaticAnalyzerEngine/Header.h"
+#include "InjectHeader.h"
+
 
 int main()
 {
 	HANDLE hDevice, hCompletionPort;
 	DWORD bytesReturned, nThreads = 0, threadId;
 	PTHREAD_PARAMETER_CONTEXT pParameterContext = new THREAD_PARAMETER_CONTEXT;
-	char exitChar;
+	char exitChar = '\0';
 	BOOL success;
 
 	nThreads = KlEdrDetectNumOfProcessors();
@@ -143,6 +144,7 @@ DWORD WINAPI InjThreadStartRoutine(
 	DWORD threadId = 0, bytesReturn = 0;
 	OVERLAPPED overLapped;
 	LPOVERLAPPED lpOverLapped = NULL;
+	ULONG_PTR completionKey = 0;
 	INJ_DATA_FROM_KERNEL dataFromKernel;
 	BOOL success;
 
@@ -184,7 +186,7 @@ DWORD WINAPI InjThreadStartRoutine(
 		success = GetQueuedCompletionStatus(
 			pThreadParameterContext->hCompletionPort,
 			&bytesReturn,
-			NULL,
+			&completionKey,
 			&lpOverLapped,
 			INFINITE
 			);
@@ -222,7 +224,7 @@ BOOL InjectDLL(
 	_In_ DWORD PID
 )
 {
-	HANDLE hProcess, hThread;
+	HANDLE hProcess, hThread = 0;
 	LPVOID lpDllPath = NULL;
 	SIZE_T sDataWritten = 0;
 	BOOL isSuccess, returnValue = FALSE;
@@ -347,4 +349,18 @@ CLEANFUNCUP:
 	CloseHandle(hProcess);
 
 	return returnValue;
+}
+
+DWORD KlEdrDetectNumOfProcessors()
+{
+	SYSTEM_INFO sysInfo;
+	DWORD nProcessors = 0;
+
+	GetSystemInfo(&sysInfo);
+
+	nProcessors = sysInfo.dwNumberOfProcessors;
+
+	std::cout << "[] SIDE NOTE: number of processors are: " << nProcessors << std::endl;
+
+	return nProcessors;
 }

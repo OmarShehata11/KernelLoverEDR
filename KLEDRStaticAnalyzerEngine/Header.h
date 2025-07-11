@@ -4,7 +4,7 @@
 /* function prototypes */
 
 // Return Number of threads you system have.
-DWORD KlEdrDetectNumOfProcessors();
+extern "C" DWORD KlEdrDetectNumOfProcessors();
 
 
 typedef struct _IO_CONTEXT

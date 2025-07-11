@@ -36,8 +36,6 @@ DWORD WINAPI ThreadStartRoutine(
 );
 
 
-
-
 int main()
 {
 	// set the number of threads..
@@ -52,7 +50,7 @@ int main()
 	//DATA_TRANSFERE_FROM_USER dataBuffer;
 
 	nThreads = KlEdrDetectNumOfProcessors();
-
+	
 
 	hDevice = CreateFileA(
 		"\\\\.\\symKLEDR",
@@ -266,7 +264,7 @@ DWORD WINAPI ThreadStartRoutine(
 		std::cout << "[+] success, we recieved the a complition packet, let's now create another request..\n";
 		std::cout << "[**] NOW IN TID: " << threadId << ", dealing with OVERLAPPED STRUCTURE: " << lpOverLapped << std::endl;
 
-		// CREATE ANOTHER REQUEST..
+	//  CREATE ANOTHER REQUEST..
 	//	ioContext = CONTAINING_RECORD(lpOverLapped, IO_CONTEXT, ov);
 
 		// now let's print the data came from the kernel..
